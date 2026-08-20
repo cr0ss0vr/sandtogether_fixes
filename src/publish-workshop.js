@@ -20,6 +20,8 @@ const DESCRIPTION = `[h1]SandTogether — Co-op Multiplayer for Sandustry[/h1]
 Play Sandustry together over the internet — no server, no port forwarding. Connect through Steam friend invites. Up to 4 players.
 
 [h2]⚠ AFTER SUBSCRIBING — READ THIS (ONE-TIME setup, ever)[/h2]
+[b]Installed between Aug 18 and Aug 20?[/b] Run [b]install.bat[/b] ONCE more (macOS: install.command, Linux: install-linux.sh) — a bug in those versions broke the auto-updater, so your game kept an old copy of the mod. Fixed from v0.9.72; after that one re-run the mod updates itself again.
+
 Sandustry cannot auto-load this kind of mod yet, so after subscribing you run the installer [b]once[/b] — after that the mod [b]updates itself automatically[/b] at every game launch:
 [olist]
 [*] Subscribe (you already did) and let Steam finish downloading.
@@ -104,7 +106,7 @@ The full source code is on GitHub: [url=https://github.com/IronBamBam1990/sandto
   const details = {
     title: TITLE,
     description: DESCRIPTION,
-    changeNote: 'v0.9.71-beta — research no longer bricks (reports: Akriz, Cr0ss0vr). A research bought by the joining player showed as Researched on the host but the building could not be placed and the tech could not be bought again; host research could throw the client into a reload cycle. Cause: the game unlockTech returns false (not enough resources, requirements, tutorial) and the mod ignored it while also charging the cost twice. Now the game deducts the cost once on the host, team unlocks are free on the other side, and a refused research is reported back instead of leaving a dead flag. Already broken saves repair themselves on load: missing buildings and items of researched techs are restored for free, no duplicates. Auto-updates at next launch.',
+    changeNote: 'v0.9.77-beta — THE fix for the whole family of sync reports (J.Slayer, Akriz, Tobi1Kenobi, Drewby, ZeroHazard, Spiddy, derErste67). They were all one mechanism, found by auditing the sync layer and reproduced on two instances: loading the world RELOADS the game page on the joining player, which wipes the mod session state, while the network connection survives in another process — so the host never learned it had to re-arm the world stream. The joining player was left standing in the host world with a DEAD mirror, effectively playing in a private copy: digging never reached the host, buildings did not propagate, research did not sync, and the old recovery path asked for the save again, producing the 10-second reload loop. Now the client announces itself to the host after every renderer start (including after a world load) and the host re-arms the stream immediately, sending the save only when the client really is somewhere else. Also fixed: a transfer deadlock that left clients stuck on Receiving world forever, placeholders showing literally as {0} in messages, and a false no-data-from-host warning during normal quiet moments. Verified end to end.',
     previewPath: PREVIEW,
     contentPath: CONTENT,
     visibility: vis,
