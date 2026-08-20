@@ -16,7 +16,7 @@
 			window.electron && window.electron.log && window.electron.log("info", "SandTogether:game", line);
 		} catch (e) {}
 	};
-	const VER = "0.9.86-beta";
+	const VER = "0.9.90-beta";
 	const AUTHOR = "Kamil Padula";
 	const CONTRIBUTORS = "dotNine, Knight-HD, DwoaC, Cr0ss0vr, TCentraL, AlyxiaFox, NanYu_sad.";
 	const VACUUM_CAPS = [500, 1000, 1500, 2000, 2500, 3000]; // tabela pojemności z kodu gry (moduł 6420)
@@ -618,13 +618,22 @@
 			setStatus(t("players", ST.peers.size + 1));
 			try { net.send({ t: "mver", v: VER, gf: ST._gameFp || null }, from); } catch (e) {} // wersja MODA + odcisk buildu GRY
 			// stary mod (≤0.9.7) nie zna mver i nie odpowie — po 5s bez odpowiedzi ALARM (przypadek "ziomek na 0.9.0")
-			if (!msg.ready) setTimeout(() => { // 0.9.82: handshake renderera NIE uruchamia kontroli "stary mod"
-				const pp = ST.peers.get(from);
-				if (pp && !pp.modVer) {
+			// Kontrola "stary mod" z PONOWIENIAMI (0.9.88): brak odpowiedzi w 5 s nie znaczy stary mod —
+			// peer bywa w trakcie wczytywania świata albo jego renderer właśnie wstaje po przeładowaniu.
+			if (!msg.ready) {
+				const askVer = (attempt) => {
+					const pp = ST.peers.get(from);
+					if (!pp || pp.modVer) return;                       // już wiemy — koniec
+					if (attempt < 3) {
+						try { net.send({ t: "mver", v: VER, gf: ST._gameFp || null }, from); } catch (e) {}
+						setTimeout(() => askVer(attempt + 1), attempt === 1 ? 7000 : 13000);
+						return;
+					}
 					setStatus(t("ver_mismatch") + " [" + (pp.nick || from) + ": OLD mod (<= 0.9.7)! / you: " + VER + "]", "#f66");
-					log("PEER NA STARYM MODZIE (brak odpowiedzi mver):", pp.nick || from, "— musi zrobić install.bat!");
-				}
-			}, 5000);
+					log("PEER NA STARYM MODZIE (brak odpowiedzi mver po 25 s):", pp.nick || from, "— musi zrobić install.bat!");
+				};
+				setTimeout(() => askVer(1), 5000);
+			}
 			if (ST.net.role === "host") {
 				enqueueFullWorld(); // 0.9.76: KAZDY hello (takze po przeladowaniu renderera klienta) = pelny swiat od nowa
 				const hst = ST.state, myWid = hst && hst.store.meta && hst.store.meta.worldId;
@@ -733,8 +742,12 @@
 			// (fix TCentraL "went crazy with the retrys"): ignorujemy, dopóki bieżący odbiór się nie skończy.
 			// 0.9.75: guard tylko dla ŻYWEGO odbioru. Zakleszczony (host już wysłał world-end, a nam
 			// brakuje paczek, albo trwa >30 s) MUSI ustąpić — inaczej klient nigdy nie dostanie pełnego świata.
-			if (ST._worldRx && !ST._worldRx.done && !ST._worldRx.ended && performance.now() - (ST._worldRx.t0 || 0) < 30000) { log("world-begin ZIGNOROWANY — odbiór poprzedniego transferu w toku"); return; }
-			if (ST._worldRx && !ST._worldRx.done) log("porzucam zakleszczony odbiór tid " + ST._worldRx.tid + " (" + ST._worldRx.got + "/" + ST._worldRx.total + ") — przyjmuję nowy transfer tid " + msg.tid);
+			// 0.9.87: NOWSZY transfer wygrywa (paczki i tak są filtrowane po tid, więc przeplot jest niemożliwy).
+			if (ST._worldRx && !ST._worldRx.done && msg.tid !== undefined && ST._worldRx.tid !== undefined && msg.tid < ST._worldRx.tid) {
+				log("world-begin STARSZY (tid " + msg.tid + " < " + ST._worldRx.tid + ") — ignoruję"); return;
+			}
+			if (ST._worldRx && !ST._worldRx.done) log("przełączam odbiór: tid " + ST._worldRx.tid + " (" + ST._worldRx.got + "/" + ST._worldRx.total + ") → tid " + msg.tid);
+			
 			ST._gotHostWorld = true; // otrzymaliśmy świat OD hosta → ufamy jego worldId gdy oboje w grze (patrz applyWorldBatch)
 			ST._worldRx = { tid: msg.tid, name: msg.name, total: msg.chunks, parts: new Array(msg.chunks), got: 0, from, done: false, ended: false, t0: performance.now() };
 			log("world-begin: tid", msg.tid, "-", msg.name, "-", msg.chunks, "paczek,", Math.round((msg.size || 0) / 1024), "KB");
@@ -761,6 +774,8 @@
 			// na poprzednim) = odesłanie mu paczek z nowego transferu, które i tak odrzuci → wieczne "recovering".
 			// Zamiast tego startujemy świeży, kompletny transfer.
 			if (ST._wtx && msg.tid !== undefined && ST._wtx.tid !== undefined && msg.tid !== ST._wtx.tid) {
+				if (performance.now() - (ST._wtxRestartT || 0) < 3000) { return; } // 0.9.87: nie restartuj częściej niż co 3 s
+				ST._wtxRestartT = performance.now();
 				log("world-need dla starego transferu tid " + msg.tid + " (mamy " + ST._wtx.tid + ") — wysyłam świat od nowa");
 				ST._autoSendT = 0; ST._wtx = null; sendWorld(); return;
 			}
@@ -943,7 +958,8 @@
 		// 0.9.78: paczki bez potwierdzenia po 10 s traktujemy jako ZGUBIONE (typowe dla Steam P2P).
 		// Bez tego ich wiersze zostaja u klienta puste NA ZAWSZE (host ma je za dostarczone) — to jest
 		// przyczyna "dziurawego swiata" przez internet przy dzialajacym LAN.
-		if (w.ackSeen && w.unacked && w.unacked.size) {
+		// 0.9.90: nie w trakcie pierwszej synchronizacji (wielka kolejka) — tam brak ACK znaczy "nie nadąża", nie "zgubione"
+		if (w.ackSeen && w.unacked && w.unacked.size && w.pending.size < 200) {
 			let lost = 0;
 			for (const [sq, rec] of [...w.unacked]) {
 				if (now - rec.t < 20000) continue;
@@ -973,8 +989,11 @@
 			// Floor of 2, not 8. At the measured bpc of ~2 KB a floor of 8 still held ~310 KB/s, which is
 			// nearly the 349 KB/s that caused the jam: the controller had nowhere to go and degenerated
 			// into pure on/off stalling.
-			const maxN = Math.max(2, Math.min(400, Math.floor(budget / bpc)));
-			const nearN = Math.min(120, maxN);              // what players can actually see gets the budget first
+			// 0.9.90: maxN to już tylko GÓRNY limit kandydatów — o rozmiarze paczki decyduje budżet bajtowy niżej.
+			const ratio = w.ratio || 0.12;                  // zmierzony stosunek: po kompresji / przed
+			const rawBudget = Math.max(64 * 1024, Math.floor(budget / Math.max(0.02, ratio)));
+			const maxN = Math.max(2, Math.min(3000, Math.floor(budget / bpc) * 8));
+			const nearN = Math.min(600, maxN);              // what players can actually see gets the budget first
 			// Fast lane usage from the PREVIOUS batch, which is stable frame to frame. Without it we
 			// reserved all 120 slots even when nothing near the players was dirty, so the far lane got
 			// scraps on a link that was doing nothing.
@@ -1006,7 +1025,10 @@
 			const parts = [];
 			let size = 0;
 			let fogSkipped = 0;
-			for (const idx of take) {
+			let stoppedAt = -1;
+			for (let ti = 0; ti < take.length; ti++) {
+				if (size >= rawBudget) { stoppedAt = ti; break; } // budżet wyczerpany — reszta wróci do kolejki
+				const idx = take[ti];
 				const ccx = idx % d.cx, ccy = Math.floor(idx / d.cx);
 				const x0 = ccx * CHUNK, y0 = ccy * CHUNK;
 				const cw = Math.min(CHUNK, W - x0), ch = Math.min(CHUNK, H - y0);
@@ -1067,6 +1089,7 @@
 				for (const r of rows) { buf.set(etRows.subarray(r * cw, r * cw + cw), o); o += cw; }
 				parts.push(buf); size += buf.length;
 			}
+			if (stoppedAt >= 0) for (let ti = stoppedAt; ti < take.length; ti++) w.pending.add(take[ti]); // 0.9.90: nie gubimy reszty
 			if (!parts.length) { w.busy = false; return; }
 			const all = new Uint8Array(size);
 			let o = 0; for (const p of parts) { all.set(p, o); o += p.length; }
@@ -1082,6 +1105,8 @@
 			// holds regardless of what the sim is doing.
 			const bpcNow = packed.length / parts.length;
 			w.bpc = w.bpc ? w.bpc * 0.8 + bpcNow * 0.2 : bpcNow;
+			const ratioNow = packed.length / Math.max(1, all.length);
+			w.ratio = w.ratio ? w.ratio * 0.8 + ratioNow * 0.2 : ratioNow; // 0.9.90: ile realnie zostaje po kompresji
 			// statystyki
 			w.applyBytes += packed.length; w.applyCount += parts.length;
 			w.fogSkipped = (w.fogSkipped || 0) + fogSkipped;
@@ -1756,20 +1781,28 @@
 			// tech od hosta TYLKO gdy klient jest w swiecie z dzialajacym lustrem (0.9.72): w menu/loadzie
 			// unlockTech gry odmawia (tutorial/scena), a po reloadzie i tak wszystko przepada -> burza odmow w logu
 			if (msg.th && ST.wsx.everApplied && !ST._loadingWorld && state.store.scene && state.store.scene.active !== 1 && state.store.player && state.store.player.tech) {
-				for (const k of Object.keys(msg.th)) {
-					if (k === "undefined" || !msg.th[k] || state.store.player.tech[k]) continue;
-					if (techRefusedRecently(k)) continue;
-					// NOWY tech od hosta → PEŁNY unlock u klienta (menu budynków, itemy do ekwipunku, MAPA!)
-					// — goła flaga zostawiała UI martwe ("kolega zbadał mapę, ja jej nie mam" — ЗаКеЛьМан).
-					// "free": zapłacił host — bez sprawdzania/odejmowania kosztu u klienta (fix 0.9.71).
-					ST._applyingNet = true;
-					try {
-						const realU = techUnlock(state, k, "free");
-						if (realU === true) { state.store.player.tech[k] = true; log("SYNC: tech od drużyny odblokowany:", k, "(REAL)"); } // flaga node'a jawnie (fix podwójnego zakupu)
-						else if (realU === null) { state.store.player.tech[k] = true; try { ST.FH.events.emit(state, "tech:unlocked", { techId: k, suppressMusic: true }); } catch (e) {} log("SYNC: tech od drużyny:", k, "(FALLBACK flaga — patch _techMod nie pasuje do tego builda gry!)"); }
-						else log("SYNC: gra ODMÓWIŁA odblokowania tech od drużyny:", k, "(zablokowany/tutorial/wymagania) — ponowię za 3 s, flagi NIE stawiam");
-					} finally { ST._applyingNet = false; }
+				// KOLEJNOŚĆ ZALEŻNOŚCI (0.9.89): drzewko ma wymagania wstępne, a klucze obiektu przychodzą
+				// w dowolnej kolejności — próba "dziecka" przed "rodzicem" jest odrzucana przez grę.
+				// Powtarzamy przebieg, dopóki cokolwiek się odblokowuje (punkt stały, max 6 rund).
+				let todo = Object.keys(msg.th).filter((k) => k !== "undefined" && msg.th[k] && !state.store.player.tech[k]);
+				for (let round = 0; round < 6 && todo.length; round++) {
+					const stillTodo = [];
+					let progress = false;
+					for (const k of todo) {
+						if (state.store.player.tech[k]) continue;
+						if (round === 0 && techRefusedRecently(k)) { stillTodo.push(k); continue; }
+						ST._applyingNet = true;
+						try {
+							const realU = techUnlock(state, k, "free");
+							if (realU === true) { state.store.player.tech[k] = true; progress = true; log("SYNC: tech od drużyny odblokowany:", k, "(REAL)"); }
+							else if (realU === null) { state.store.player.tech[k] = true; progress = true; try { ST.FH.events.emit(state, "tech:unlocked", { techId: k, suppressMusic: true }); } catch (e) {} log("SYNC: tech od drużyny:", k, "(FALLBACK flaga — patch _techMod nie pasuje do tego builda gry!)"); }
+							else stillTodo.push(k);
+						} finally { ST._applyingNet = false; }
+					}
+					todo = stillTodo;
+					if (!progress) break; // nic nie ruszyło — dalsze rundy nic nie dadzą, spróbujemy za 3 s
 				}
+				if (todo.length && !ST._techPendLogged) { ST._techPendLogged = true; log("SYNC: " + todo.length + " tech od drużyny czeka na wymagania (" + todo.join(",") + ") — ponowię"); }
 			}
 			// auto-naprawa (0.9.71) tylko gdy klient JEST w swiecie z dzialajacym lustrem (nie w menu / nie w trakcie loadu)
 			if (ST.wsx.everApplied && !ST._loadingWorld && performance.now() - (ST._techRepairT || 0) > 20000) { ST._techRepairT = performance.now(); techRepair(state, "client"); }
