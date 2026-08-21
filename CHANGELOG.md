@@ -1,3 +1,167 @@
+## 0.9.140-beta
+
+**Teleport zones now come from the host.** Measured: host 27 zones, client 18. Zones live in
+`store.world.teleportZones` and are appended as the game reveals prefabs, so a client - which walks on the
+host's terrain but keeps its own world - ends up with a different set, meaning a passage can simply not
+work for them or lead somewhere else than it does for the host. The host now sends the zone list in the
+state packet whenever it changes, and the client replaces its own and rebuilds the entry-cell cache the
+game consults when you step into a zone. Verified live: the client's list was cut to 5 by hand and the
+host restored all 45 within seconds ("STREFY: mialem 5 -> od hosta 45").
+
+Not a bug, for the record: the client showing no entity sprites (host 38, client 0) is not missing
+creatures. That container holds visual effects - sparks, lights, lasers, timed particles - which are
+spawned by the simulation. The client's simulation is deliberately stopped, so it spawns none. Cosmetic,
+and inherent to the mirror design.
+
+## 0.9.139-beta
+
+**Deleting a conveyor could leave a red line behind.** The cleanup added in 0.9.136 only looked at
+foundation tiles (terrain types 15-18), but conveyors, shakers, velocity soakers and growers each lay down
+their own terrain type. Measured in a live world, identical on host and client so the garbage was real:
+132 orphaned ConveyorLeft tiles and 36 ConveyorRight tiles with no structure on them - a row of those is
+exactly the red line. The sweep now covers every terrain type that only ever comes from a structure
+(15-22, 24, 26) and still never touches natural ground like stone or ice. After the change those types
+disappear from the orphan count entirely.
+
+## 0.9.138-beta
+
+**A teammate's build preview could stay on your screen forever, looking like garbage you could not
+remove.** The mod draws what another player is about to place, in their colour. That preview is cleared
+when their next position packet arrives without a build intent - but position packets are only sent while
+a player moves, so someone who placed something and then stood still never sent the clearing packet.
+Verified from the report: the cell under the cursor was empty and byte-identical on host and client, with
+no orphaned tiles, dead cells, unknown element types or projectiles anywhere near - the red bar was never
+in the world at all. The preview now expires two seconds after the last confirmed intent.
+
+## 0.9.137-beta
+
+**The client was silently missing structures — measured: host 1019, client 841.** Foundation tiles arrive
+through the world mirror, but the structures themselves are rebuilt on the client from snapshots. 0.9.102
+added slicing so a 90k-structure snapshot could not freeze a frame, deferring the remainder "to the next
+snapshot" — while the host skips sending a snapshot at all when its structure set has not changed. The
+deferred remainder therefore had nowhere to come from and those structures were never built, leaving their
+tiles rendered red. The client now keeps the remainder and finishes it over the following frames on its
+own; verified live going from 841 back to 1019 with the mirror untouched.
+
+**Orphaned foundation tiles are swept continuously, not only inside a remembered demolition rectangle.**
+A tile of a building type with no live structure is garbage that renders red and that the game will not
+clean up itself. Measured after a client-side deletion: 12 such tiles at identical coordinates on host and
+client, so the mirror was faithful and the garbage was real, sitting in the host world. Host and solo now
+scan around the players every 5 seconds and remove tiles confirmed orphaned across two passes, six seconds
+apart, so a tile that is merely queued for placement is never taken. Verified with nine synthetic orphans:
+all nine removed on the next pass.
+
+## 0.9.135-beta
+
+**Progression now travels from the host instead of being chased through world ids.** 0.9.132 made the
+client load the host world whenever the ids differed, but loading a transferred save assigns a *new* world
+id, so the condition could never be satisfied and the client reloaded in a loop until it dropped out of the
+session. The rescue load is back to a single attempt per session (stored in sessionStorage so a reload
+cannot reset it), and the host now sends its unlocked buildings and item list in the state packet: the
+client adds what it is missing and drops what the host does not have, without overwriting items it already
+holds (the grabber tank and ammo are local state). Verified live: client at 11,16 / 0 tech pulled up to
+11,16,4 / 1 tech while sitting in a differently numbered world. Merging the unlocked-buildings list is
+**Cr0ss0vr's idea from PR #13**.
+
+**A hint when you try to reach your own public address from inside your network.** Direct internet hosting
+was verified end to end from an outside machine: UPnP opened the port, the WebSocket handshake completed,
+and the host streamed a full save transfer plus 969 mirror packets - 11.37 MB in 20 seconds. From the same
+LAN, though, connecting to your own public IP is refused by most routers (no hairpin NAT), which looks
+exactly like a broken mod. The panel now says so and points at the local address instead.
+
+## 0.9.132-beta
+Credit where it is due: **Cr0ss0vr** reported this as issue #12 and sent PR #13 ("allow building unlock
+state to propagate"), which merged the host's unlocked-buildings list into the client. I closed that PR as
+superseded by the 0.9.71 research fix - too early, because the symptom he described was still real. His
+report is what kept the thread alive until the actual cause showed up: the client was never in the host's
+world at all.
+
+**The client kept its own progression after joining - tools, research and buildings from its previous
+game.** The client received the host save but the reload-loop guard skipped loading it, so the save was
+only imported: the mirror painted the host terrain into the buffers of a *different* world and everything
+looked right, while the player store stayed local. Measured on a fresh host world: host 4 items / 1 tech,
+client 21 items. The rescue load used to require that the mirror had never started, which is never true
+once the mod trusts a freshly received world id - the condition is now simply "my world id differs from
+the one the host plays in", rate limited to once every 30 seconds so it cannot loop.
+
+## 0.9.131-beta
+
+**Tools worked once and then died on the client - digging in particular.** Weapon cooldowns are game-time
+stamps compared against `store.meta.time`, and every world has its own clock. The client was handed an
+inventory restored from local storage, so it also inherited cooldown stamps from a different session:
+measured `meta.time` 1,043,848 against a shovel cooldown stamped 3,106,579 - half an hour in the future,
+so "667 ms have passed" was never true again. Future-dated cooldowns are now straightened out on world
+load and on a periodic check, and the local profile no longer restores the inventory at all: progression
+(tools, upgrades, buildings) belongs to the host world the client loads, and only the player position is
+kept locally.
+
+**Half the screen turned yellow on the client with the shovel out.** Not world data - the mirror matched
+the host byte for byte - but the pause mechanism itself. The mod stopped the client with the manager
+`paused` flag, which also gates work the renderer needs every frame. Clearing that flag while holding the
+simulation at speed 0 made the artifact vanish instantly with the sand still frozen, so the client now
+brakes with simulation speed instead. The same change removes the post-autosave desync for free: saving
+toggles the `paused` flag and the game clears it when the save finishes, but nothing in the game touches
+the speed multiplier.
+
+**Grabber shaking works on the client.** Shaking is checked before harvesting in the game and takes
+priority, and the tutorial has you hold the button while shaking - so the mod's harvest hook swallowed it
+and wet sand never turned into gold or residue.
+
+## 0.9.127-beta
+
+**No more desync after an automatic save.** The game pauses the simulation worker while saving and resumes
+it when the save finishes. On a client that simulation must stay paused - it is the whole basis of the
+mirror - but the mod only re-asserted the pause on a 2 second heartbeat, so after every autosave the client
+simulated its own sand for up to two seconds. Worse, those two seconds stayed in the mirror permanently:
+the host keeps per-row hashes and believed the client already had current data, so it never resent those
+rows. The client now holds the pause for the whole save and re-asserts it the moment the save ends, then
+sends the host a map of the chunks its simulation could have touched; the host drops their hashes and
+streams them again.
+
+## 0.9.126-beta
+
+**The client grabber now behaves like the host one.** Root cause: the game allocates the grabber tank
+matrix at its maximum size and reports how many slots are actually active through `tool.data.size`
+(measured: size 225 = 15x15 while the array held 400 slots). The bridge read the array length instead,
+so the client harvested at the allocation size no matter what the player had set, and everything that
+landed outside the active window was invisible to the game - material simply vanished.
+
+Four more differences against the vanilla grabber were closed along the way:
+
+- collecting continues while the button is held, into free slots, instead of stopping as soon as the tank
+  held anything (the bridge treated "tank not empty" as "placing mode"),
+- the tank header follows the game invariant: count equals the number of filled active slots, and the type
+  lock clears when the tank is empty (a broken invariant made the game see a full tank as empty),
+- merged particles resolve to their real material through `linkedElementIndex`, exactly like the game,
+  instead of being stored as the technical "Particle" type,
+- harvest maps to tank slots by position relative to the cursor (closest first), each slot bound to one
+  cell, with pulses every 33 ms instead of every 100 ms; anything the client cannot store is put back on
+  the map instead of being destroyed.
+
+## 0.9.120-beta
+
+**Fixed a deadlock that froze the client world.** When the client renderer restarted (which the mod itself
+triggers when auto-loading the host world), its ack counter went back to zero while the host was at packet
+2651. The host read that as "client is 26 batches behind", paused sending, and the client could never ack
+because nothing arrived. Both sides waited forever. Hello/resync now reset the ack baseline, and the host
+self-heals if acks stop advancing for 8 s.
+
+**World packets now travel as binary frames instead of base64 inside JSON.** Same data, 25% fewer bytes, and
+no encode/decode work on either side (used on LAN/direct links between peers on the same mod version; Steam
+relay keeps the text path).
+
+**Large packets no longer freeze the client.** Incoming world data is applied in time-sliced portions across
+frames instead of one blocking pass — worst client frame dropped from 237 ms to ~16 ms while throughput went
+up, not down.
+
+**Grabber on the client collects as much as it does for the host.** The bridge scanned a fixed 9x9 area and
+took at most 48 items; the game actually harvests into a 20x20 tank grid where each slot is bound to a
+position relative to the cursor. The client now sends its free-slot map, the host harvests exactly into those
+slots (closest first), and pulses run every 33 ms instead of every 100 ms.
+
+**Client no longer strands itself in the wrong world.** If the mirror never starts and the client is in a
+different world than the host, it loads the host save instead of waiting for a manual Load Game.
+
 # Changelog — SandTogether (Sandustry co-op mod)
 
 *Translated from the original Polish development journal.*

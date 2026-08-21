@@ -20,7 +20,7 @@ const DESCRIPTION = `[h1]SandTogether — Co-op Multiplayer for Sandustry[/h1]
 Play Sandustry together in ONE living world — the same sand, the same factory, the same fluids, streamed live between players. Up to 4 players, over the internet or on a LAN.
 
 [h2]⚠ AFTER SUBSCRIBING — READ THIS (ONE-TIME setup)[/h2]
-[b]Installed between Aug 18 and Aug 20?[/b] Run the installer ONE more time — a bug in those builds silently broke the auto-updater, so your game kept an old copy of the mod no matter what the Workshop delivered. Fixed from v0.9.72; after that single re-run, updates are automatic again.
+[b]Installed an early August build and never see updates?[/b] Run the installer ONE more time — a bug in those builds silently broke the auto-updater, so the game kept an old copy of the mod. Every build since fixes itself no matter what the Workshop delivered. Fixed from v0.9.72; after that single re-run, updates are automatic again.
 
 Sandustry has no mod loader yet, so after subscribing you run the installer [b]once[/b]:
 [olist]
@@ -36,9 +36,9 @@ From then on the mod updates itself at every launch, so both players always matc
 [h2]How to play[/h2]
 Main menu → [b]Multiplayer[/b] → pick how you want to connect:
 [list]
-[*] [b]Host (Internet — direct)[/b] — recommended. The mod opens the port on your router by itself (UPnP) and shows your address [b]masked[/b], with show/hide and a copy button that never puts it on screen — safe to stream. Your friend pastes that address into Join. This is the fastest route: it does NOT go through Steam relay servers, which throttle bandwidth and add latency.
+[*] [b]Host (Internet — direct)[/b] — recommended. The mod opens the port on your router by itself (UPnP) and shows your address [b]masked[/b], with show/hide and a copy button that never puts it on screen — safe to stream. Your friend pastes that address into [b]Join by address[/b] (the same button also covers LAN and VPN). This is the fastest route: it does NOT go through Steam relay servers, which throttle bandwidth and add latency.
 [*] [b]Host (Steam)[/b] + [b]Invite[/b] — zero setup, invite straight from your Steam friend list.
-[*] [b]Host LAN[/b] / [b]Join[/b] — same network, or a VPN mesh like Tailscale.
+[*] [b]Host LAN[/b] / [b]Join by address[/b] — same network, or a VPN mesh like Tailscale. One warning: from inside your own network you cannot reach your own public address — most routers refuse it — so when you are both on the same network, use the local 192.168.x.x address.
 [*] [b]Join by Lobby ID[/b] — paste an ID from the clipboard.
 [/list]
 Then press [b]Load last save & PLAY[/b] (or pick a save) — your world is sent to everyone who joins, automatically. Set your nick in the lobby so your friends see who is who.
@@ -51,11 +51,14 @@ Then press [b]Load last save & PLAY[/b] (or pick a save) — your world is sent 
 [*] One shared factory: build, demolish, move, copy-paste blueprints, pipes, signal wiring and buttons — from both sides
 [*] Shared team progression: research and upgrades pool, tech tree, story steps, objectives, critter collection, factory processes — with automatic repair of research broken by older versions
 [*] See your teammates: real player models with equipped tools, build ghosts, grabber crosshairs, off-screen arrows, team chat
-[*] Per-player memory: rejoin a world and you are back where you left off, with your inventory
+[*] Rejoin a world and you are back where you left off. Progression — tools, research, upgrades and unlocked buildings — belongs to the host world, so everyone in the session shares it
 [*] Steam achievements keep working; the panel warns in red if mod versions or game builds differ
 [*] Trilingual UI: English / Polski / 简体中文 (Simplified Chinese by NanYu_sad.), picked from your system language
 [*] Windows, macOS and Linux
 [/list]
+
+[h2]Performance[/h2]
+The world is streamed as changed rows only, compressed, and — between players on the same mod over LAN or a direct connection — as raw binary frames instead of text, which removes a quarter of the bytes and all of the encoding work. Incoming world data is applied in slices across frames, so a big packet never freezes the picture: measured on a full-size world, the worst client frame dropped from 237 ms to about 16 ms while throughput rose past 20 MB/s. The host adapts its send rate to what the link and the slowest client can actually take.
 
 [h2]The SandTogether panel (top-right)[/h2]
 [list]
@@ -68,7 +71,7 @@ Then press [b]Load last save & PLAY[/b] (or pick a save) — your world is sent 
 Both players must run the same mod version AND the same game version — the panel says so in red when they differ. If something misbehaves, send me a short description plus your log file: Windows %APPDATA%\\Sandustry\\logs\\main.log, macOS ~/Library/Logs/Sandustry/main.log, Linux ~/.config/Sandustry/logs/main.log. Reports with a log are usually fixed the same day.
 
 [h2]💛 Thank you — this mod is community-built[/h2]
-Code contributors: [b]dotNine[/b] (player models, world auto-transfer, collision sync), [b]Knight-HD[/b] (building placement, grabber rework, teammate ghosts), [b]DwoaC[/b] (the macOS port — installer, launcher and the Steam-callback fix), [b]Cr0ss0vr[/b] (precise client demolish selection, foundation cleanup after demolition), [b]TCentraL[/b] (blob-expanding red-tile cleanup — our sharpest tester who then sent code), [b]AlyxiaFox[/b] (congestion control for the world sync) and [b]NanYu_sad.[/b] (the complete Simplified Chinese translation).
+Code contributors: [b]dotNine[/b] (player models, world auto-transfer, collision sync), [b]Knight-HD[/b] (building placement, grabber rework, teammate ghosts), [b]DwoaC[/b] (the macOS port — installer, launcher and the Steam-callback fix), [b]Cr0ss0vr[/b] (precise client demolish selection, foundation cleanup after demolition, and the report and first patch for progression not reaching the client — the trail that led to the 0.9.132 root cause), [b]TCentraL[/b] (blob-expanding red-tile cleanup — our sharpest tester who then sent code), [b]AlyxiaFox[/b] (congestion control for the world sync) and [b]NanYu_sad.[/b] (the complete Simplified Chinese translation).
 
 And to everyone whose precise reports shaped almost every release: [b]TCentraL[/b], [b]Warlow[/b], [b]derErste67[/b], [b]Akriz[/b], [b]tony.s.jennette[/b], [b]ZeroHazard[/b], [b]Tobi1Kenobi[/b], [b]Drewby[/b], [b]Spiddy[/b], [b]J.Slayer[/b], [b]Psychospark[/b] (our first Linux player), [b]MFeltmann[/b], [b]Dr. Ethulwulf Sauce[/b], [b]NanYu_sad.[/b], [b]ЗаКеЛьМан[/b], [b]星灵[/b], [b]Lofar666[/b], [b]Bobulator333[/b], [b]thatsmaik[/b], [b]uolkx[/b], [b]MIXUIL[/b], [b]Justin[/b], [b]Hooye!![/b], [b]Sprut[/b] — and everyone else who reported, tested and played.
 
@@ -101,7 +104,7 @@ Full source on GitHub: [url=https://github.com/IronBamBam1990/sandtogether]githu
   const details = {
     title: TITLE,
     description: DESCRIPTION,
-    changeNote: 'v0.9.90-beta — WORLD SYNC IS ROUGHLY TWELVE TIMES FASTER. The batch limit used to be a number of chunks derived from an average cost, so a nearly empty piece of map (which costs almost nothing after compression) took up the same slot as a dense one - joining a big world crawled at twenty to fifty chunks per second. The limit is now measured in real bytes, with the compression ratio measured live. Measured on a 9216-chunk world: 580 to 600 chunks per second at the same bandwidth ceiling, with the joining player keeping up and no lag. Also gone: the false lost-packet resends that fired during the first sync (they were resending data the client was simply still working through). Auto-updates at next launch.',
+    changeNote: 'v0.9.141-beta - JOINING AN INTERNET HOST IS NO LONGER HIDDEN BEHIND A BUTTON LABELLED LAN. Hosting over the internet had its own clearly named option, but the only way to join was a button called Join LAN, described as connecting to a LAN or VPN host - so nobody could guess that a friend pastes their public address there. Same transport, clearer name: it is now Join by address, and it covers an internet host, a LAN and a VPN alike. Also in this build, teleport zones now come from the host: measured 27 zones on the host against 18 on the client, which meant a passage could fail to work for the joining player or lead somewhere else than it did for the host.',
     previewPath: PREVIEW,
     contentPath: CONTENT,
     visibility: vis,
